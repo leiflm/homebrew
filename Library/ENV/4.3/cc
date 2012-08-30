@@ -44,20 +44,16 @@ class Cmd
     end
   end
   def tool
-    case @cmd
-      when /gcc/ then 'gcc'
-      when /g\+\+/ then 'g++'
-    when 'clang', 'clang++'
-      @cmd
-    when 'ld', 'cpp', 'cc'
-      ENV['HOMEBREW_CC'].chuzzle or 'clang'
-    when 'c++'
-      case ENV['HOMEBREW_CC']
-        when /gcc/ then 'g++'
-        else 'clang++'
+    @tool ||= if @cmd.include? '++'
+      if ENV['HOMEBREW_CC'].chuzzle =~ /gcc/
+        'g++'
+      else
+        'clang++'
       end
+    elsif @cmd == 'ld'
+      'ld'
     else
-      abort "Unknown command: #{@cmd}"
+      ENV['HOMEBREW_CC'].chuzzle or 'clang'
     end
   end
   def args
@@ -66,7 +62,11 @@ class Cmd
     else
       @args.dup
     end
-    args.unshift("--sysroot=#$sdkroot") if nclt?
+    if @cmd != 'ld'
+      args.unshift("--sysroot=#$sdkroot")
+    else
+      args.unshift("-syslibroot$sdkroot")
+    end if nclt?
     case mode
     when :cpp
       %w{-E} + cppflags + args
@@ -111,10 +111,18 @@ class Cmd
       end
     end
 
-    rms = @args - args
-    %w{CPPFLAGS LDFLAGS CXXFLAGS CFLAGS}.each do |flag|
-      unison = ENV[flag].split(' ') & rms
-      puts "Warning! #{unison*' '} removed from #{flag.upcase} by superenv" unless unison.empty?
+    dels = @args - args
+    if ENV['VERBOSE']
+      adds = args - @args
+      puts "brew: Superenv removed: #{dels*' '}" unless dels.empty?
+      puts "brew: Superenv added: #{adds*' '}" unless adds.empty?
+    else
+      %w{CPPFLAGS LDFLAGS CXXFLAGS CFLAGS}.each do |flag|
+        if ENV[flag]
+          flags = dels.select{|del| ENV[flag].include? del }.join(' ')
+          puts "brew: Warning! superenv removed #{unison} from #{flag}" unless flags.empty?
+        end
+      end
     end
 
     args
